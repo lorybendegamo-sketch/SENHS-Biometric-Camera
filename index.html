@@ -1,0 +1,310 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SENHS Biometric Camera</title>
+
+<style>
+* { box-sizing:border-box; }
+
+body {
+  margin:0;
+  padding:20px;
+  font-family:Arial,sans-serif;
+  background:#eef3f9;
+  color:#102f59;
+}
+
+.container {
+  max-width:650px;
+  margin:20px auto;
+  background:white;
+  padding:22px;
+  border-radius:16px;
+  box-shadow:0 5px 20px rgba(0,0,0,.10);
+}
+
+h2 { text-align:center; margin-top:0; }
+.subtitle { text-align:center; color:#64748b; }
+
+label {
+  display:block;
+  font-weight:bold;
+  margin:15px 0 7px;
+}
+
+select,button {
+  width:100%;
+  padding:13px;
+  border-radius:8px;
+  font-size:15px;
+}
+
+select {
+  border:1px solid #cbd5e1;
+  background:white;
+}
+
+video {
+  width:100%;
+  aspect-ratio:4/3;
+  background:#102f59;
+  object-fit:cover;
+  border-radius:12px;
+  margin-top:15px;
+}
+
+button {
+  border:0;
+  margin-top:10px;
+  color:white;
+  background:#145da0;
+  font-weight:bold;
+  cursor:pointer;
+}
+
+button:disabled {
+  opacity:.45;
+  cursor:not-allowed;
+}
+
+.capture { background:#e58b16; }
+.use-photo { background:#16834a; }
+.stop { background:#64748b; }
+
+#preview {
+  display:none;
+  width:100%;
+  max-height:450px;
+  object-fit:contain;
+  margin-top:15px;
+  border-radius:12px;
+  background:#e2e8f0;
+}
+
+#status {
+  margin-top:15px;
+  padding:12px;
+  background:#f1f5f9;
+  border-radius:8px;
+  font-size:13px;
+  line-height:1.5;
+}
+
+#studentLRN {
+  text-align:center;
+  font-weight:bold;
+  color:#145da0;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h2>SENHS BIOMETRIC CAMERA</h2>
+<p class="subtitle">Student Photo Capture System</p>
+
+<label>STUDENT LRN</label>
+<input id="studentLRN" readonly
+style="width:100%;padding:12px;border:1px solid #cbd5e1;border-radius:8px">
+
+<label>SELECT CAMERA</label>
+<select id="cameraSelect">
+<option value="">Detecting cameras...</option>
+</select>
+
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas" style="display:none"></canvas>
+<img id="preview" alt="Captured student photo">
+
+<button id="startBtn" onclick="startCamera()">START CAMERA</button>
+<button id="captureBtn" class="capture" onclick="capturePhoto()" disabled>
+CAPTURE PHOTO
+</button>
+<button id="retakeBtn" onclick="retakePhoto()" disabled>
+RETAKE PHOTO
+</button>
+<button id="useBtn" class="use-photo" onclick="usePhoto()" disabled>
+USE THIS PHOTO
+</button>
+<button class="stop" onclick="stopCamera()">STOP CAMERA</button>
+
+<div id="status">Preparing camera...</div>
+
+</div>
+
+<script>
+let stream = null;
+let capturedData = null;
+
+const video = document.getElementById("video");
+const select = document.getElementById("cameraSelect");
+const statusBox = document.getElementById("status");
+
+const params = new URLSearchParams(location.search);
+const lrn = params.get("lrn") || "";
+
+document.getElementById("studentLRN").value = lrn;
+
+function status(message) {
+  statusBox.textContent = message;
+}
+
+async function detectCameras() {
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error("Camera API is not available. Use HTTPS and updated Chrome or Edge.");
+    }
+
+    const temp = await navigator.mediaDevices.getUserMedia({
+      video:true,
+      audio:false
+    });
+
+    temp.getTracks().forEach(track => track.stop());
+
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices.filter(d => d.kind === "videoinput");
+
+    select.innerHTML = "";
+
+    cameras.forEach((camera,index) => {
+      const option = document.createElement("option");
+      option.value = camera.deviceId;
+      option.textContent = camera.label || "Camera " + (index+1);
+      select.appendChild(option);
+    });
+
+    if (!cameras.length) {
+      throw new Error("No camera detected.");
+    }
+
+    status("Camera detected. Select a camera and press START CAMERA.");
+
+  } catch(error) {
+    status("Camera detection error: " + error.message);
+  }
+}
+
+async function startCamera() {
+  try {
+    stopCamera(false);
+
+    status("Opening camera...");
+
+    const deviceId = select.value;
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:false,
+      video:deviceId
+        ? {
+            deviceId:{exact:deviceId},
+            width:{ideal:1280},
+            height:{ideal:720}
+          }
+        : {
+            width:{ideal:1280},
+            height:{ideal:720}
+          }
+    });
+
+    video.srcObject = stream;
+    await video.play();
+
+    document.getElementById("captureBtn").disabled = false;
+
+    status("Camera READY. Position the student and press CAPTURE PHOTO.");
+
+  } catch(error) {
+    status("Unable to open camera: " + error.name + " - " + error.message);
+  }
+}
+
+function capturePhoto() {
+  if (!stream || !video.videoWidth) {
+    status("Start the camera first.");
+    return;
+  }
+
+  const canvas = document.getElementById("canvas");
+
+  const maxWidth = 1000;
+  const scale = Math.min(1, maxWidth / video.videoWidth);
+
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+
+  canvas.getContext("2d").drawImage(
+    video,0,0,canvas.width,canvas.height
+  );
+
+  capturedData = canvas.toDataURL("image/jpeg",0.85);
+
+  document.getElementById("preview").src = capturedData;
+  document.getElementById("preview").style.display = "block";
+
+  document.getElementById("retakeBtn").disabled = false;
+  document.getElementById("useBtn").disabled = false;
+
+  status("Photo captured. Check the preview or RETAKE PHOTO.");
+}
+
+function retakePhoto() {
+  capturedData = null;
+
+  document.getElementById("preview").style.display = "none";
+  document.getElementById("useBtn").disabled = true;
+  document.getElementById("retakeBtn").disabled = true;
+
+  status("Ready to capture again.");
+}
+
+function usePhoto() {
+  if (!capturedData) {
+    status("Capture a photo first.");
+    return;
+  }
+
+  if (!window.opener || window.opener.closed) {
+    status("Original SENHS Biometric tab is not available. Open this camera from Student Management.");
+    return;
+  }
+
+  window.opener.postMessage({
+    type:"SENHS_STUDENT_CAMERA_PHOTO",
+    lrn:lrn,
+    image:capturedData
+  },"https://script.google.com");
+
+  status("Photo sent to the original SENHS Biometric tab. Check that tab to continue uploading.");
+}
+
+function stopCamera(showMessage=true) {
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+    stream = null;
+  }
+
+  video.srcObject = null;
+  document.getElementById("captureBtn").disabled = true;
+
+  if (showMessage) status("Camera stopped.");
+}
+
+select.addEventListener("change",() => {
+  if (stream) startCamera();
+});
+
+window.addEventListener("beforeunload",stopCamera);
+
+if (!/^\d{12}$/.test(lrn)) {
+  status("Invalid or missing student LRN. Open this page from Student Management.");
+} else {
+  detectCameras();
+}
+</script>
+</body>
+</html>
